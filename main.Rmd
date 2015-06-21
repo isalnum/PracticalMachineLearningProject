@@ -1,0 +1,97 @@
+---
+title: "Prediction the Correctness of Weight Lifting Exercises"
+author: "isalnum"
+date: "June 21, 2015"
+output: html_document
+cache: TRUE
+---
+
+Introduction
+=========================
+
+```{r echo = FALSE, warning=FALSE, message=FALSE}
+library(dplyr)
+library(caret)
+library(FSelector)
+library(doParallel)
+
+trainData <- read.csv("pml-training.csv")
+testData <- read.csv("pml-testing.csv")
+
+
+```
+
+The aim of this analysis is to build a model for predicting the correctness of weight lifting exercise.
+Data used for this analysis contains values measured by number of sensors while weight lifting exercise were performed.
+It also contains information about time and the name of the user.
+The data are labeled into 5 classes A, B, C, D, and E, where A denotes correct execution of exercise and the other 4 classes mistakes.
+Training data set contains `r nrow(trainData)` instances and `r ncol(trainData)` attributes (including the class attribute).
+
+Data Preprocessing
+=========================
+
+```{r echo = FALSE, warning=FALSE, message=FALSE}
+trainData <- select(trainData, -(1:6))
+testData <- select(testData, -(1:6))
+
+
+
+feature_weights <- chi.squared(classe ~ ., data = trainData)
+subset <- cutoff.k(feature_weights, 20)
+```
+
+There are some unusable attributes in the data so we removed them.
+Specifically, we removed the first 6 attributes corresponding to the row number, user name, 3 attributes with time information, and one with window.
+Also, we performed feature selection on the remaining data from the training data set.
+For this purpose, we used `FSelector` package and `chi.squared` function.
+We selected the top 20 features as predictors. Names of the features are:
+```{r echo = FALSE}
+subset
+trainData <- trainData[, c(subset, "classe")]
+testData <- testData[, subset]
+
+preProcValues <- preProcess(select(trainData, -classe), method = c("knnImpute"))
+
+trainTransformed <- predict(preProcValues, select(trainData, -classe))
+testTransformed <- predict(preProcValues, testData)
+
+```
+
+We also imputed missing values using the knnImpute method.
+
+Model Training
+=========================
+
+We trained Random Forest model for prediction.
+10-fold cross validation were used in the training process.
+We also performed parameter tuning, i.e. tuning of the number of randomly selected predictors in Random Forest.
+This parameter, denoted as `mtry`, was set to values 2, 5, 10, 20, 30, 40, and 50.
+
+
+```{r echo = FALSE, warning=FALSE, message=FALSE}
+fitControl <- trainControl(## 10-fold CV
+    method = "cv",
+    number = 10)
+
+cl <- makeCluster(detectCores())
+registerDoParallel(cl)
+
+rfGrid <-  expand.grid(mtry = c(2, 5, 10, 20, 30, 40, 50))
+
+rfFit <- train(x = trainTransformed, y = trainData$classe,
+                 method = "rf",
+                 trControl = fitControl,
+                 verbose = FALSE,
+               tuneGrid = rfGrid)
+
+
+stopCluster(cl)
+```
+
+Results
+=========================
+The best results were obtained for mtry == `r unlist(rfFit$bestTune)` and the **exptected out of sample error** is **`r round((1 - max(rfFit$results$Accuracy)) * 100, digits = 2)`%**.
+The whole results of cross-validation with different values of the `mtry` parameter are as follows:
+```{r echo = FALSE}
+rfFit
+```
